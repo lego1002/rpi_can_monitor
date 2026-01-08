@@ -137,12 +137,27 @@ def start_can_interface():
         print("Failed to start CAN1 interface.")
 
 def connect_can(bus_channel='can0'):
-    while True:
+    """
+    連接 CAN 接口，支持自動重試
+    """
+    max_retries = 5
+    retry_count = 0
+    
+    print(f"⏳ 嘗試連接 {bus_channel}...")
+    
+    while retry_count < max_retries:
         try:
-            return can.interface.Bus(channel=bus_channel, bustype='socketcan')
-        except OSError:
-            print("CAN not available, retrying in 5 sec...")
-            time.sleep(5)
+            bus = can.interface.Bus(channel=bus_channel, interface='socketcan')
+            print(f"✅ 成功連接到 {bus_channel}")
+            return bus
+        except Exception as e:
+            retry_count += 1
+            if retry_count >= max_retries:
+                print(f"❌ 無法連接 {bus_channel} (已嘗試 {max_retries} 次)")
+                print(f"   錯誤: {e}")
+                return None
+            print(f"⚠️  {bus_channel} 連接失敗，重試中 ({retry_count}/{max_retries})...")
+            time.sleep(1)
 
 def new_csv_writer(base_dir, base_name):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -160,8 +175,35 @@ def main():
     base_dir = "/home/pi/Desktop/RPI_Desktop/LOGS"
     os.makedirs(base_dir, exist_ok=True)
 
-    bus0 = connect_can('can0')
-    bus1 = connect_can('can1')
+    # 嘗試連接虛擬 CAN（測試），然後是實際 CAN 接口
+    print("\n📡 初始化 CAN 接口...")
+    
+    # 優先使用虛擬 CAN 進行測試
+    bus0 = connect_can('vcan0')
+    if bus0 is None:
+        print("⚠️  vcan0 不可用，嘗試實際 CAN (can0)...")
+        bus0 = connect_can('can0')
+    
+    bus1 = connect_can('vcan0')  # 虛擬 CAN 只有一個接口，所以 bus1 也用 vcan0
+    if bus1 is None:
+        print("⚠️  vcan0 不可用，嘗試實際 CAN (can1)...")
+        bus1 = connect_can('can1')
+    
+    # 如果沒有 can1，就用 bus0
+    if bus1 is None:
+        print("⚠️  使用 bus0 進行雙總線模擬...")
+        bus1 = bus0
+    
+    if bus0 is None:
+        print("\n❌ 致命錯誤：沒有可用的 CAN 接口")
+        print("✅ 請執行以下命令設置虛擬 CAN：")
+        print("   sudo modprobe vcan")
+        print("   sudo ip link add dev vcan0 type vcan")
+        print("   sudo ip link set up vcan0")
+        print("   ip link show vcan0  # 驗證")
+        return
+    
+    print("✅ CAN 接口準備就緒\n")
     
     # 讀取上次的累計里程
     cumulative_distance_km = read_cumulative_distance(base_dir)
@@ -185,10 +227,35 @@ def main():
     last_wheel_speed_time = None
     wheel_speed_events = []  # 記錄 (左輪速, 右輪速, 時間偏移)
     
+    connection_failed_count = 0
+    max_connection_failures = 3
+    
     while True:
-        # 從兩個 CAN bus 接收訊息
-        msg0 = bus0.recv(timeout=0.001)  # 使用較短的 timeout
-        msg1 = bus1.recv(timeout=0.001)
+        try:
+            # 從兩個 CAN bus 接收訊息
+            msg0 = bus0.recv(timeout=0.001) if bus0 else None  # 使用較短的 timeout
+            msg1 = bus1.recv(timeout=0.001) if bus1 else None
+            connection_failed_count = 0  # 重置失敗計數
+        except Exception as e:
+            connection_failed_count += 1
+            if connection_failed_count == 1:
+                print(f"⚠️  Error receiving CAN messages: {e}")
+            
+            # 如果連續失敗超過 3 次，嘗試重新連接到 vcan0
+            if connection_failed_count >= max_connection_failures:
+                print(f"❌ CAN 連接失敗 {connection_failed_count} 次，嘗試重新連接到 vcan0...")
+                bus0 = connect_can('vcan0')
+                bus1 = bus0  # vcan0 只有一個接口
+                connection_failed_count = 0
+                if bus0 is None:
+                    print("❌ 無法連接到任何 CAN 接口，5 秒後重試...")
+                    time.sleep(5)
+                    continue
+            
+            msg0 = None
+            msg1 = None
+            time.sleep(0.01)  # 短暫延遲避免 CPU 忙碌迴圈
+            continue
         
         # 檢查 VCU 指令和狀態 (從 can0)
         if msg0 is not None and hasattr(msg0, 'arbitration_id') and msg0.arbitration_id == 0x281 and len(msg0.data) > 1:
@@ -476,8 +543,12 @@ if __name__ == "__main__":
         print("\nProgram interrupted by user")
     except Exception as e:
         print(f"Program error: {e}")
-        with open("/tmp/can_logger_error.log", "w") as f:
-            f.write(f"Error at {datetime.now()}: {str(e)}")
+        try:
+            error_log_path = os.path.expanduser("~/Desktop/RPI_Desktop/LOGS/can_logger_error.log")
+            with open(error_log_path, "w") as f:
+                f.write(f"Error at {datetime.now()}: {str(e)}")
+        except Exception as log_error:
+            print(f"Failed to write error log: {log_error}")
     finally:
         print("CAN Logger stopped")
 
