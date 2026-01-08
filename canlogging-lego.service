@@ -1,0 +1,29 @@
+[Unit]
+Description=CAN Bus Logger with Wheel Speed Odometry Service
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/Desktop/RPI_Desktop
+ExecStart=/usr/bin/python3 /home/pi/Desktop/RPI_Desktop/canlogging-v4_lego.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=canlogging-lego
+
+# Security and resource settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/pi/Desktop/RPI_Desktop/LOGS
+
+# Allow CAN interface access
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target

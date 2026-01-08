@@ -1,0 +1,27 @@
+[Unit]
+Description=Wheel Speed REST API Service
+After=network.target canlogging-lego.service
+Wants=network-online.target
+Requires=canlogging-lego.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/Desktop/RPI_Desktop
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+ExecStart=/usr/bin/python3 /home/pi/Desktop/RPI_Desktop/wheel-speed-api.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wheel-speed-api
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/pi/Desktop/RPI_Desktop/LOGS
+
+[Install]
+WantedBy=multi-user.target
