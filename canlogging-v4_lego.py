@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timedelta
 
 import subprocess
-
+lego = 10
 vcu_instruction = False
 vcu_state = 0x00  # 追蹤 VCU state
 rtd_active = False  # 追蹤 RTD 狀態
